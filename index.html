@@ -274,7 +274,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import {
-    getFirestore, initializeFirestore, collection, addDoc, deleteDoc, doc,
+    getFirestore, collection, addDoc, deleteDoc, doc,
     onSnapshot, query, orderBy
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -287,8 +287,7 @@
     appId: "1:710827165889:web:d9e953e8dfb5d57ead6c40"
   });
 
-  // 明确指定台湾节点
-  const db = initializeFirestore(app, {}, 'asia-east1');
+  const db = getFirestore(app);
 
   const WEEK_LIMIT = 10000;
   const MONTH_LIMIT = 20000;
