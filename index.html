@@ -271,23 +271,13 @@
 
 <div class="toast" id="toast"></div>
 
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import {
-    getFirestore, collection, addDoc, deleteDoc, doc,
-    onSnapshot, query, orderBy
-  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = 'https://vssivtxfcxoptgevcdwd.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzc2l2dHhmY3hvcHRnZXZjZHdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MjAzMDgsImV4cCI6MjA4OTM5NjMwOH0.WyoAkQT2Vw6rTIl_Q8JTQQwW4uFXeWYynSijyA8S0Po';
 
-  const app = initializeApp({
-    apiKey: "AIzaSyAjwQwBHsN_S8GQf_y_uYHGXj0d0yCWAU0",
-    authDomain: "mahjong-tracker-80924.firebaseapp.com",
-    projectId: "mahjong-tracker-80924",
-    storageBucket: "mahjong-tracker-80924.firebasestorage.app",
-    messagingSenderId: "710827165889",
-    appId: "1:710827165889:web:d9e953e8dfb5d57ead6c40"
-  });
-
-  const db = getFirestore(app);
+  const { createClient } = supabase;
+  const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const WEEK_LIMIT = 10000;
   const MONTH_LIMIT = 20000;
@@ -303,21 +293,37 @@
   document.getElementById('inputDate').value = new Date().toISOString().slice(0, 10);
   const syncEl = document.getElementById('syncStatus');
 
-  onSnapshot(
-    query(collection(db, 'records'), orderBy('createdAt', 'desc')),
-    (snap) => {
-      records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // 初始加载数据
+  async function loadRecords() {
+    syncEl.textContent = '☁️ 连接中…';
+    syncEl.className = 'sync-status syncing';
+    try {
+      const { data, error } = await db
+        .from('records')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      records = data || [];
       syncEl.textContent = '☁️ 已同步';
       syncEl.className = 'sync-status synced';
       renderAll();
-    },
-    (err) => {
+    } catch(e) {
       syncEl.textContent = '⚠️ 同步失败，检查网络';
       syncEl.className = 'sync-status error';
-      console.error(err);
+      console.error(e);
     }
-  );
+  }
 
+  // 实时订阅
+  db.channel('records-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'records' }, () => {
+      loadRecords();
+    })
+    .subscribe();
+
+  loadRecords();
+
+  // ——— 工具 ———
   function getWeekRange() {
     const now = new Date();
     const day = now.getDay() || 7;
@@ -346,6 +352,7 @@
     setTimeout(() => t.classList.remove('show'), 2500);
   }
 
+  // ——— 渲染 ———
   function renderAll() { renderStats(); renderBudgets(); renderRecords(); }
 
   function renderStats() {
@@ -453,27 +460,31 @@
           <div class="record-note">${esc(r.note || '')}</div>
         </div>
         <div class="record-amount ${isPlus ? 'plus' : 'minus'}">${isPlus ? '+' : '-'}${r.amount.toLocaleString()}</div>
-        <button class="record-delete" onclick="deleteRecord('${r.id}')">✕</button>
+        <button class="record-delete" onclick="deleteRecord(${r.id})">✕</button>
       </div>`;
     }).join('');
   }
 
+  // ——— 操作 ———
   window.setView = (view, el) => {
     currentView = view;
     document.querySelectorAll('.person-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
     renderAll();
   };
+
   window.selectPerson = (p) => {
     currentPerson = p;
     document.getElementById('btnYlm').className = 'toggle-btn' + (p==='ylm' ? ' active-person' : '');
     document.getElementById('btnTls').className = 'toggle-btn' + (p==='tls' ? ' active-person' : '');
   };
+
   window.selectOutcome = (type) => {
     currentOutcome = type;
     document.getElementById('btnPlus').className = 'toggle-btn' + (type==='plus' ? ' active-plus' : '');
     document.getElementById('btnMinus').className = 'toggle-btn' + (type==='minus' ? ' active-minus' : '');
   };
+
   window.addRecord = async () => {
     const date = document.getElementById('inputDate').value;
     const amount = parseFloat(document.getElementById('inputAmount').value);
@@ -487,34 +498,45 @@
 
     const pName = PERSONS[currentPerson];
     try {
-      await addDoc(collection(db, 'records'), {
-        date, amount, outcome: currentOutcome, person: currentPerson,
-        note: note || (currentOutcome==='plus' ? `${pName}今天手气不错！` : `${pName}今天差点意思…`),
-        createdAt: Date.now()
+      const { error } = await db.from('records').insert({
+        date,
+        amount,
+        outcome: currentOutcome,
+        person: currentPerson,
+        note: note || (currentOutcome==='plus' ? `${pName}今天手气不错！` : `${pName}今天差点意思…`)
       });
+      if (error) throw error;
       document.getElementById('inputAmount').value = '';
       document.getElementById('inputNote').value = '';
       const msgs = currentOutcome==='plus'
         ? ['记下了！状态真好 🎉', '加分！记好账 ✅', '势不可挡！🀄']
         : ['记下了，下局扳回来 🙏', '没关系，继续努力 📝', '别灰心，下局一定行 💪'];
       showToast(msgs[Math.floor(Math.random() * msgs.length)]);
+      await loadRecords();
     } catch(e) {
       showToast('❌ 保存失败，检查网络');
       console.error(e);
     }
     btn.disabled = false;
   };
+
   window.deleteRecord = async (id) => {
     if (!confirm('确定删除这条记录？')) return;
-    try { await deleteDoc(doc(db, 'records', id)); showToast('🗑️ 已删除'); }
-    catch(e) { showToast('❌ 删除失败'); }
+    try {
+      const { error } = await db.from('records').delete().eq('id', id);
+      if (error) throw error;
+      showToast('🗑️ 已删除');
+      await loadRecords();
+    } catch(e) { showToast('❌ 删除失败'); }
   };
+
   window.setFilter = (filter, el) => {
     currentFilter = filter;
     document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
     renderRecords();
   };
+
   window.exportCSV = () => {
     if (!records.length) { showToast('还没有记录可以导出'); return; }
     const header = '日期,记录人,加扣分,积分,备注';
